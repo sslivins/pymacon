@@ -218,7 +218,7 @@ class ArcticControllerClient:
             raise ArcticCertificateError(
                 "controller certificate fingerprint changed"
             ) from error
-        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+        except (TimeoutError, aiohttp.ClientError) as error:
             raise ArcticConnectionError(
                 f"could not pair with controller at {host}"
             ) from error
@@ -392,7 +392,7 @@ class ArcticControllerClient:
     ) -> CommandResult:
         """Ask the controller to change power; state remains push-confirmed."""
         if not isinstance(on, bool):
-            raise ValueError("on must be a boolean")
+            raise TypeError("on must be a boolean")
         return await self._put_command(
             "/api/v1/control/power",
             {"command_id": self._command_id(command_id), "on": on},
@@ -420,7 +420,7 @@ class ArcticControllerClient:
         if kind not in {"cooling", "heating", "hot_water"}:
             raise ValueError("unsupported setpoint kind")
         if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError("setpoint value must be an integer")
+            raise TypeError("setpoint value must be an integer")
         return await self._put_command(
             "/api/v1/control/setpoint",
             {
@@ -470,9 +470,7 @@ class ArcticControllerClient:
         return value
 
     def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": "".join(("Bearer", " ", self._token))
-        }
+        return {"Authorization": f"Bearer {self._token}"}
 
     async def _get_json(self, path: str) -> Mapping[str, Any]:
         session = await self._ensure_session()
@@ -500,7 +498,7 @@ class ArcticControllerClient:
             raise ArcticCertificateError(
                 "controller certificate fingerprint changed"
             ) from error
-        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+        except (TimeoutError, aiohttp.ClientError) as error:
             raise ArcticConnectionError(
                 f"GET {path} could not reach the controller"
             ) from error
@@ -555,7 +553,7 @@ class ArcticControllerClient:
             raise ArcticCertificateError(
                 "controller certificate fingerprint changed"
             ) from error
-        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+        except (TimeoutError, aiohttp.ClientError) as error:
             raise ArcticConnectionError(
                 f"PUT {path} could not reach the controller"
             ) from error
@@ -581,12 +579,7 @@ class ArcticControllerClient:
                 stream_error = error
                 await self._shutdown_background(error)
                 return
-            except (
-                ArcticConnectionError,
-                ArcticProtocolError,
-                aiohttp.ClientError,
-                asyncio.TimeoutError,
-            ) as error:
+            except (TimeoutError, ArcticConnectionError, ArcticProtocolError, aiohttp.ClientError) as error:
                 stream_error = error
             finally:
                 if (
@@ -609,7 +602,7 @@ class ArcticControllerClient:
                 await asyncio.wait_for(
                     self._stop_event.wait(), timeout=delay * jitter
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             delay = min(delay * 2, self._reconnect_max_delay)
 
@@ -698,7 +691,7 @@ class ArcticControllerClient:
                     self._poll_wakeup.wait(), timeout=interval
                 )
                 self._poll_wakeup.clear()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
             if not self._running:

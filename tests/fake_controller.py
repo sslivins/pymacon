@@ -194,7 +194,7 @@ class FakeController:
         }
 
     def _authorized(self, request: web.Request) -> bool:
-        expected = "".join(("Bearer", " ", self.token))
+        expected = f"Bearer {self.token}"
         return request.headers.get("Authorization") == expected
 
     async def _pair(self, request: web.Request) -> web.Response:

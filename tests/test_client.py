@@ -6,18 +6,17 @@ import asyncio
 
 import aiohttp
 import pytest
+from fake_controller import FakeController, wait_for
 
 from pymacon import (
+    ControllerCapabilities,
     MaconAuthenticationError,
     MaconCertificateError,
     MaconClient,
     MaconCommandConflictError,
     MaconPairingError,
     MaconProtocolError,
-    ControllerCapabilities,
 )
-
-from fake_controller import FakeController, wait_for
 
 
 @pytest.fixture
