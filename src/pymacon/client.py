@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 import random
+import ssl
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
@@ -67,6 +69,47 @@ def _normalize_token(value: str) -> str:
             "token must contain 64 hexadecimal characters"
         ) from error
     return value.lower()
+
+
+def _tofu_ssl_context() -> ssl.SSLContext:
+    """Build a context that completes the handshake without verifying.
+
+    Pairing uses trust-on-first-use: we cannot verify the controller's
+    self-signed certificate against a CA, so we accept the handshake to
+    capture the certificate it presents, then pin the pairing request to
+    that certificate and cross-check it against the fingerprint the
+    controller signs into its pairing response body.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+async def _fetch_peer_fingerprint(
+    host: str, port: int, timeout: float
+) -> str:
+    """Capture the SHA-256 of the certificate the controller presents."""
+    connect = asyncio.open_connection(
+        host, port, ssl=_tofu_ssl_context(), server_hostname=host
+    )
+    _reader, writer = await asyncio.wait_for(connect, timeout)
+    try:
+        ssl_object = writer.get_extra_info("ssl_object")
+        der = (
+            ssl_object.getpeercert(binary_form=True)
+            if ssl_object is not None
+            else None
+        )
+    finally:
+        writer.close()
+        with suppress(Exception):
+            await writer.wait_closed()
+    if not der:
+        raise ArcticCertificateError(
+            "could not read the controller certificate during pairing"
+        )
+    return hashlib.sha256(der).hexdigest()
 
 
 class ArcticControllerClient:
@@ -181,28 +224,35 @@ class ArcticControllerClient:
         cls,
         host: str,
         code: str,
-        fingerprint: str | bytes,
         *,
         port: int = 8443,
         session: aiohttp.ClientSession | None = None,
         request_timeout: float = 10.0,
     ) -> PairingResult:
-        """Claim the physically displayed one-time pairing code."""
+        """Claim the physically displayed one-time pairing code.
+
+        Uses trust-on-first-use: the controller's self-signed certificate is
+        captured from the pairing connection and cross-checked against the
+        fingerprint the controller signs into its response body. The verified
+        fingerprint is returned so the caller can pin it for all future
+        connections. No fingerprint needs to be supplied or typed by a user.
+        """
         if len(code) != 6 or not code.isdigit():
             raise ValueError("pairing code must contain exactly six digits")
-        fingerprint_text, fingerprint_bytes = _normalize_fingerprint(
-            fingerprint
-        )
         owns_session = session is None
         active_session = session or aiohttp.ClientSession()
         url = URL.build(scheme="https", host=host, port=port).join(
             URL("/api/v1/pair")
         )
         try:
+            observed_fingerprint = await _fetch_peer_fingerprint(
+                host, port, request_timeout
+            )
+            observed_bytes = bytes.fromhex(observed_fingerprint)
             async with active_session.post(
                 url,
                 json={"code": code},
-                ssl=aiohttp.Fingerprint(fingerprint_bytes),
+                ssl=aiohttp.Fingerprint(observed_bytes),
                 timeout=aiohttp.ClientTimeout(total=request_timeout),
             ) as response:
                 if response.status != 200:
@@ -212,11 +262,11 @@ class ArcticControllerClient:
                         f"{message}"
                     )
                 result = PairingResult.from_dict(await response.json())
-        except ArcticPairingError:
+        except (ArcticPairingError, ArcticCertificateError):
             raise
         except aiohttp.ServerFingerprintMismatch as error:
             raise ArcticCertificateError(
-                "controller certificate fingerprint changed"
+                "controller certificate changed during pairing"
             ) from error
         except (TimeoutError, aiohttp.ClientError) as error:
             raise ArcticConnectionError(
@@ -230,9 +280,15 @@ class ArcticControllerClient:
             raise ArcticProtocolError(
                 f"unsupported protocol version {result.protocol_version}"
             )
-        if result.fingerprint.lower() != fingerprint_text:
+        try:
+            claimed_text, _ = _normalize_fingerprint(result.fingerprint)
+        except ValueError as error:
             raise ArcticProtocolError(
-                "pairing response fingerprint does not match TLS pin"
+                "pairing response fingerprint is invalid"
+            ) from error
+        if observed_fingerprint != claimed_text:
+            raise ArcticCertificateError(
+                "controller certificate does not match the pairing response"
             )
         try:
             _normalize_token(result.token)

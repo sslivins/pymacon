@@ -55,7 +55,6 @@ async def test_pairing_claims_token_and_verifies_identity(controller):
     result = await MaconClient.pair(
         controller.host,
         controller.pairing_code,
-        controller.fingerprint,
         port=controller.port,
     )
     assert result.device_id == controller.device_id
@@ -66,7 +65,17 @@ async def test_pairing_claims_token_and_verifies_identity(controller):
         await MaconClient.pair(
             controller.host,
             "000000",
-            controller.fingerprint,
+            port=controller.port,
+        )
+
+
+@pytest.mark.asyncio
+async def test_pairing_rejects_forged_fingerprint(controller):
+    controller.reported_fingerprint = "0" * 64
+    with pytest.raises(MaconCertificateError):
+        await MaconClient.pair(
+            controller.host,
+            controller.pairing_code,
             port=controller.port,
         )
 
