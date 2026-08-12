@@ -290,6 +290,9 @@ class ReadingState:
 class ErrorState:
     active: bool
     description: str | None
+    code: str | None = None
+    name: str | None = None
+    severity: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -416,6 +419,15 @@ class ControllerState:
                 active=_boolean(error.get("active"), "state.error.active"),
                 description=_optional_string(
                     error.get("description"), "state.error.description"
+                ),
+                code=_optional_string(
+                    error.get("code"), "state.error.code"
+                ),
+                name=_optional_string(
+                    error.get("name"), "state.error.name"
+                ),
+                severity=_optional_string(
+                    error.get("severity"), "state.error.severity"
                 ),
             ),
         )
