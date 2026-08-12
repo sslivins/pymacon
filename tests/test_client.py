@@ -119,9 +119,31 @@ async def test_setup_returns_typed_capabilities_and_state(controller):
     await client.stop()
 
 
-def test_capabilities_require_per_setpoint_flags(controller):
+def test_capabilities_tolerate_missing_setpoint_controls(controller):
     data = controller.capabilities()
     del data["capabilities"]["setpoint_controls"]
+
+    caps = ControllerCapabilities.from_dict(data)
+
+    assert caps.setpoint_controls.cooling is False
+    assert caps.setpoint_controls.heating is False
+    assert caps.setpoint_controls.hot_water is False
+
+
+def test_capabilities_default_missing_setpoint_flags(controller):
+    data = controller.capabilities()
+    data["capabilities"]["setpoint_controls"] = {"cooling": True}
+
+    caps = ControllerCapabilities.from_dict(data)
+
+    assert caps.setpoint_controls.cooling is True
+    assert caps.setpoint_controls.heating is False
+    assert caps.setpoint_controls.hot_water is False
+
+
+def test_capabilities_reject_non_object_setpoint_controls(controller):
+    data = controller.capabilities()
+    data["capabilities"]["setpoint_controls"] = "nope"
 
     with pytest.raises(MaconProtocolError):
         ControllerCapabilities.from_dict(data)

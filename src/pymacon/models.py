@@ -43,6 +43,18 @@ def _boolean(value: Any, name: str) -> bool:
     return value
 
 
+def _boolean_default(value: Any, name: str, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return _boolean(value, name)
+
+
+def _optional_mapping(value: Any, name: str) -> Mapping[str, Any]:
+    if value is None:
+        return {}
+    return _mapping(value, name)
+
+
 def _string_tuple(value: Any, name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or any(
         not isinstance(item, str) or not item for item in value
@@ -165,7 +177,7 @@ class ControllerCapabilities:
         limits = _mapping(
             data.get("setpoint_limits_c"), "setpoint_limits_c"
         )
-        setpoint_controls_data = _mapping(
+        setpoint_controls_data = _optional_mapping(
             capabilities.get("setpoint_controls"),
             "capabilities.setpoint_controls",
         )
@@ -204,15 +216,15 @@ class ControllerCapabilities:
                 "capabilities.supported_modes",
             ),
             setpoint_controls=SetpointCapabilities(
-                cooling=_boolean(
+                cooling=_boolean_default(
                     setpoint_controls_data.get("cooling"),
                     "capabilities.setpoint_controls.cooling",
                 ),
-                heating=_boolean(
+                heating=_boolean_default(
                     setpoint_controls_data.get("heating"),
                     "capabilities.setpoint_controls.heating",
                 ),
-                hot_water=_boolean(
+                hot_water=_boolean_default(
                     setpoint_controls_data.get("hot_water"),
                     "capabilities.setpoint_controls.hot_water",
                 ),
