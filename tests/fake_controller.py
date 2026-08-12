@@ -48,6 +48,7 @@ class FakeController:
         self.host = "127.0.0.1"
         self.port = 0
         self.fingerprint = ""
+        self.reported_fingerprint: str | None = None
 
     async def start(self) -> FakeController:
         cert_path, key_path, self.fingerprint = self._create_identity()
@@ -207,7 +208,11 @@ class FakeController:
             {
                 "protocol_version": 1,
                 "device_id": self.device_id,
-                "sha256_fingerprint": self.fingerprint,
+                "sha256_fingerprint": (
+                    self.reported_fingerprint
+                    if self.reported_fingerprint is not None
+                    else self.fingerprint
+                ),
                 "token": self.token,
             },
             headers={"Cache-Control": "no-store"},
