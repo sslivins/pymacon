@@ -10,6 +10,7 @@ from fake_controller import FakeController, wait_for
 
 from pymacon import (
     ControllerCapabilities,
+    ControllerState,
     MaconAuthenticationError,
     MaconCertificateError,
     MaconClient,
@@ -403,3 +404,41 @@ async def test_client_rejects_invalid_command_values_before_http(controller):
     with pytest.raises(ValueError):
         await client.async_set_cooling_setpoint(20, command_id="")
     await client.stop()
+
+
+def _state_payload(**error_fields):
+    controller = FakeController.__new__(FakeController)
+    controller.device_id = "arctic-abcdef012345"
+    controller.boot_id = "boot"
+    controller.revision = 1
+    controller.tank_temperature = 40
+    payload = controller.snapshot()["state"]
+    payload["error"] = error_fields
+    return payload
+
+
+def test_error_state_parses_enriched_fields():
+    state = ControllerState.from_dict(
+        _state_payload(
+            active=True,
+            code="P02",
+            name="Water flow fault",
+            description="Water flow switch open",
+            severity="critical",
+        )
+    )
+    assert state.error.active is True
+    assert state.error.code == "P02"
+    assert state.error.name == "Water flow fault"
+    assert state.error.description == "Water flow switch open"
+    assert state.error.severity == "critical"
+
+
+def test_error_state_back_compat_without_new_fields():
+    state = ControllerState.from_dict(
+        _state_payload(active=False, description=None)
+    )
+    assert state.error.active is False
+    assert state.error.code is None
+    assert state.error.name is None
+    assert state.error.severity is None
