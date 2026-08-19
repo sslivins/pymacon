@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymacon"
-version = "0.2.3"
+version = "0.3.0"
 description = "Async local client for the Macon Heat Pump Controller"
 readme = "README.md"
 license = "MIT"

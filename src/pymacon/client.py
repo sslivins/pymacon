@@ -32,6 +32,8 @@ from .models import (
     CommandResult,
     ControllerCapabilities,
     HelloMessage,
+    OtaReleaseInfo,
+    OtaStatus,
     PairingResult,
     StateSnapshot,
 )
@@ -507,6 +509,39 @@ class ArcticControllerClient:
             "hot_water", value, command_id=command_id
         )
 
+    async def async_check_updates(self) -> OtaReleaseInfo:
+        """Ask the controller to check GitHub for a newer firmware release.
+
+        Triggers a live check against the controller's configured release
+        source and returns whether an update is available. The controller
+        caches the result so a subsequent :meth:`async_start_update` can act on
+        it.
+        """
+        data = await self._get_json("/api/ota/releases")
+        return OtaReleaseInfo.from_dict(data)
+
+    async def async_ota_status(self) -> OtaStatus:
+        """Return the controller's current firmware-update progress.
+
+        Safe to poll; reports the update state (idle/downloading/verifying/
+        ready_to_reboot/failed), a 0-100 percentage, and version details.
+        """
+        data = await self._get_json("/api/ota/status")
+        return OtaStatus.from_dict(data)
+
+    async def async_start_update(self) -> None:
+        """Ask the controller to download and install the latest release.
+
+        Requires a prior :meth:`async_check_updates` that reported an
+        available, download-ready update (the controller acts on its cached
+        release info). Poll :meth:`async_ota_status` afterwards for progress.
+
+        Raises:
+            ArcticCommandValidationError: no update is available to install.
+            ArcticCommandConflictError: an update is already in progress.
+        """
+        await self._post_json("/api/ota/github")
+
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             if not self._owns_session:
@@ -621,6 +656,56 @@ class ArcticControllerClient:
                 f"PUT {path} returned an invalid command acknowledgement"
             )
         return result
+
+    async def _post_json(
+        self, path: str, payload: Mapping[str, Any] | None = None
+    ) -> Mapping[str, Any]:
+        session = await self._ensure_session()
+        try:
+            async with session.post(
+                self._base_url.join(URL(path)),
+                headers=self._headers(),
+                json=dict(payload) if payload is not None else None,
+                ssl=self._ssl,
+                timeout=self._request_timeout,
+            ) as response:
+                if response.status == 401:
+                    raise ArcticAuthenticationError(
+                        "integration credential was rejected"
+                    )
+                if response.status == 409:
+                    raise ArcticCommandConflictError(
+                        await self._error_message(response)
+                    )
+                if response.status in (400, 422):
+                    raise ArcticCommandValidationError(
+                        await self._error_message(response)
+                    )
+                if response.status not in (200, 202):
+                    message = await self._error_message(response)
+                    raise ArcticConnectionError(
+                        f"POST {path} failed with HTTP {response.status}: "
+                        f"{message}"
+                    )
+                data = await response.json()
+        except (
+            ArcticAuthenticationError,
+            ArcticCommandConflictError,
+            ArcticCommandValidationError,
+            ArcticConnectionError,
+        ):
+            raise
+        except aiohttp.ServerFingerprintMismatch as error:
+            raise ArcticCertificateError(
+                "controller certificate fingerprint changed"
+            ) from error
+        except (TimeoutError, aiohttp.ClientError) as error:
+            raise ArcticConnectionError(
+                f"POST {path} could not reach the controller"
+            ) from error
+        if not isinstance(data, Mapping):
+            raise ArcticProtocolError(f"POST {path} returned non-object JSON")
+        return data
 
     async def _stream_supervisor(self) -> None:
         delay = self._reconnect_min_delay

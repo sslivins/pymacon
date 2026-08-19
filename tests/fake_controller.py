@@ -41,6 +41,23 @@ class FakeController:
         self.hold_state_response = False
         self.commands: dict[str, tuple[str, tuple[tuple[str, Any], ...]]] = {}
         self.command_requests: list[dict[str, Any]] = []
+        self.ota_release: dict[str, Any] = {
+            "update_available": False,
+            "current_version": "2.11.6",
+            "latest_version": "2.11.6",
+            "published_at": "",
+            "download_ready": False,
+        }
+        self.ota_status: dict[str, Any] = {
+            "state": "idle",
+            "progress": 0,
+            "bytes_downloaded": 0,
+            "total_bytes": 0,
+            "current_version": "2.11.6",
+            "pending_verify": False,
+            "build_sha": "deadbeef",
+        }
+        self.ota_started = False
         self._temp_path = temp_path
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
@@ -63,6 +80,9 @@ class FakeController:
         app.router.add_put("/api/v1/control/power", self._power)
         app.router.add_put("/api/v1/control/mode", self._mode)
         app.router.add_put("/api/v1/control/setpoint", self._setpoint)
+        app.router.add_get("/api/ota/releases", self._ota_releases)
+        app.router.add_get("/api/ota/status", self._ota_status)
+        app.router.add_post("/api/ota/github", self._ota_github)
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         self._site = web.TCPSite(
@@ -284,6 +304,43 @@ class FakeController:
             "setpoint",
             (("kind", body.get("kind")), ("value", body.get("value"))),
             body,
+        )
+
+    async def _ota_releases(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        return web.json_response(self.ota_release)
+
+    async def _ota_status(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        return web.json_response(self.ota_status)
+
+    async def _ota_github(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if not self.ota_release.get("update_available"):
+            return web.json_response(
+                {"error": "No update available - check for updates first"},
+                status=400,
+            )
+        if self.ota_status.get("state") in ("downloading", "verifying"):
+            return web.json_response(
+                {"error": "OTA update already in progress"}, status=409
+            )
+        self.ota_started = True
+        self.ota_status = {
+            **self.ota_status,
+            "state": "downloading",
+            "progress": 0,
+            "new_version": self.ota_release.get("latest_version"),
+        }
+        return web.json_response(
+            {
+                "status": "started",
+                "message": "GitHub update started",
+                "version": self.ota_release.get("latest_version"),
+            }
         )
 
     async def _events(self, request: web.Request) -> web.StreamResponse:

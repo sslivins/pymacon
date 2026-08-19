@@ -15,8 +15,11 @@ from pymacon import (
     MaconCertificateError,
     MaconClient,
     MaconCommandConflictError,
+    MaconCommandValidationError,
     MaconPairingError,
     MaconProtocolError,
+    OtaReleaseInfo,
+    OtaStatus,
 )
 
 
@@ -403,6 +406,132 @@ async def test_client_rejects_invalid_command_values_before_http(controller):
         await client.async_set_setpoint("unsupported", 20)
     with pytest.raises(ValueError):
         await client.async_set_cooling_setpoint(20, command_id="")
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_check_updates_reports_available_release(controller):
+    controller.ota_release = {
+        "update_available": True,
+        "current_version": "2.11.6",
+        "latest_version": "2.12.0",
+        "published_at": "2026-08-19T00:00:00Z",
+        "download_ready": True,
+        "release_notes": "Adds crash-loop safe mode.",
+    }
+    client = make_client(controller)
+    await client.async_setup()
+    info = await client.async_check_updates()
+    assert isinstance(info, OtaReleaseInfo)
+    assert info.update_available is True
+    assert info.download_ready is True
+    assert info.current_version == "2.11.6"
+    assert info.latest_version == "2.12.0"
+    assert info.release_notes == "Adds crash-loop safe mode."
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_check_updates_when_up_to_date(controller):
+    client = make_client(controller)
+    await client.async_setup()
+    info = await client.async_check_updates()
+    assert info.update_available is False
+    assert info.download_ready is False
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_ota_status_reports_progress(controller):
+    controller.ota_status = {
+        "state": "downloading",
+        "progress": 42,
+        "bytes_downloaded": 4200,
+        "total_bytes": 10000,
+        "current_version": "2.11.6",
+        "new_version": "2.12.0",
+        "pending_verify": False,
+    }
+    client = make_client(controller)
+    await client.async_setup()
+    status = await client.async_ota_status()
+    assert isinstance(status, OtaStatus)
+    assert status.state == "downloading"
+    assert status.progress == 42
+    assert status.in_progress is True
+    assert status.failed is False
+    assert status.new_version == "2.12.0"
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_ota_status_defaults_when_idle_and_blank(controller):
+    controller.ota_status = {"state": "", "progress": 150}
+    client = make_client(controller)
+    await client.async_setup()
+    status = await client.async_ota_status()
+    assert status.state == "idle"
+    assert status.progress == 100  # clamped
+    assert status.in_progress is False
+    assert status.new_version is None
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_start_update_triggers_download(controller):
+    controller.ota_release = {
+        "update_available": True,
+        "current_version": "2.11.6",
+        "latest_version": "2.12.0",
+        "published_at": "",
+        "download_ready": True,
+    }
+    client = make_client(controller)
+    await client.async_setup()
+    await client.async_start_update()
+    assert controller.ota_started is True
+    assert controller.ota_status["state"] == "downloading"
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_start_update_without_available_raises_validation(controller):
+    client = make_client(controller)
+    await client.async_setup()
+    with pytest.raises(MaconCommandValidationError):
+        await client.async_start_update()
+    assert controller.ota_started is False
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_start_update_conflicts_when_already_running(controller):
+    controller.ota_release = {
+        "update_available": True,
+        "current_version": "2.11.6",
+        "latest_version": "2.12.0",
+        "published_at": "",
+        "download_ready": True,
+    }
+    controller.ota_status = {**controller.ota_status, "state": "verifying"}
+    client = make_client(controller)
+    await client.async_setup()
+    with pytest.raises(MaconCommandConflictError):
+        await client.async_start_update()
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_ota_endpoints_require_authentication(controller):
+    client = MaconClient(
+        controller.host,
+        "b" * 64,
+        controller.fingerprint,
+        device_id=controller.device_id,
+        port=controller.port,
+    )
+    with pytest.raises(MaconAuthenticationError):
+        await client.async_check_updates()
     await client.stop()
 
 
