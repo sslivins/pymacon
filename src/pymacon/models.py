@@ -75,6 +75,34 @@ def _optional_number(value: Any, name: str) -> float | None:
     return _number(value, name)
 
 
+def _clean_string(value: Any) -> str | None:
+    """Coerce a possibly-missing/blank JSON string to a value or None.
+
+    The OTA endpoints are informational and the firmware sometimes emits empty
+    strings for not-yet-known fields (e.g. ``new_version`` before a download
+    starts), so this is deliberately lenient rather than raising.
+    """
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def _clamped_percent(value: Any) -> int:
+    """Coerce a JSON progress value to an integer percentage in [0, 100]."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    percent = int(value)
+    return max(0, min(100, percent))
+
+
+def _nonnegative_int(value: Any) -> int:
+    """Coerce a JSON byte count to a non-negative integer, defaulting to 0."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return max(0, int(value))
+
+
 @dataclass(frozen=True, slots=True)
 class PairingResult:
     """Credential and identity returned by a successful physical claim."""
@@ -486,4 +514,80 @@ class HelloMessage:
             revision=_integer(
                 data.get("revision"), "hello.revision", minimum=1
             ),
+        )
+
+
+# Firmware-update states reported by the controller's /api/ota/status endpoint
+# that mean an update is actively being applied (used to drive a progress bar).
+OTA_ACTIVE_STATES = frozenset({"downloading", "verifying"})
+
+
+@dataclass(frozen=True, slots=True)
+class OtaReleaseInfo:
+    """Result of asking the controller to check GitHub for a newer release.
+
+    Returned by :meth:`ArcticControllerClient.async_check_updates`. Fields
+    mirror the controller's ``/api/ota/releases`` response and are parsed
+    leniently because they are informational.
+    """
+
+    update_available: bool
+    current_version: str | None
+    latest_version: str | None
+    published_at: str | None
+    download_ready: bool
+    release_notes: str | None
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> OtaReleaseInfo:
+        data = _mapping(data, "ota release")
+        return cls(
+            update_available=bool(data.get("update_available", False)),
+            current_version=_clean_string(data.get("current_version")),
+            latest_version=_clean_string(data.get("latest_version")),
+            published_at=_clean_string(data.get("published_at")),
+            download_ready=bool(data.get("download_ready", False)),
+            release_notes=_clean_string(data.get("release_notes")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class OtaStatus:
+    """Progress of an in-flight or completed firmware update.
+
+    Returned by :meth:`ArcticControllerClient.async_ota_status`. Mirrors the
+    controller's ``/api/ota/status`` response.
+    """
+
+    state: str
+    progress: int
+    bytes_downloaded: int
+    total_bytes: int
+    current_version: str | None
+    new_version: str | None
+    pending_verify: bool
+    error: str | None
+
+    @property
+    def in_progress(self) -> bool:
+        """True while the controller is actively downloading or verifying."""
+        return self.state in OTA_ACTIVE_STATES
+
+    @property
+    def failed(self) -> bool:
+        """True if the last update attempt ended in failure."""
+        return self.state == "failed"
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> OtaStatus:
+        data = _mapping(data, "ota status")
+        return cls(
+            state=_clean_string(data.get("state")) or "idle",
+            progress=_clamped_percent(data.get("progress")),
+            bytes_downloaded=_nonnegative_int(data.get("bytes_downloaded")),
+            total_bytes=_nonnegative_int(data.get("total_bytes")),
+            current_version=_clean_string(data.get("current_version")),
+            new_version=_clean_string(data.get("new_version")),
+            pending_verify=bool(data.get("pending_verify", False)),
+            error=_clean_string(data.get("error")),
         )
