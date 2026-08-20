@@ -153,6 +153,33 @@ def test_capabilities_reject_non_object_setpoint_controls(controller):
         ControllerCapabilities.from_dict(data)
 
 
+def test_capabilities_parse_network_identity(controller):
+    caps = ControllerCapabilities.from_dict(controller.capabilities())
+
+    assert caps.ip_address == "192.168.1.21"
+    assert caps.local_hostname == "arctic-e540.local"
+
+
+def test_capabilities_tolerate_missing_network(controller):
+    data = controller.capabilities()
+    del data["network"]
+
+    caps = ControllerCapabilities.from_dict(data)
+
+    assert caps.ip_address is None
+    assert caps.local_hostname is None
+
+
+def test_capabilities_tolerate_null_ip_address(controller):
+    data = controller.capabilities()
+    data["network"]["ip_address"] = None
+
+    caps = ControllerCapabilities.from_dict(data)
+
+    assert caps.ip_address is None
+    assert caps.local_hostname == "arctic-e540.local"
+
+
 @pytest.mark.asyncio
 async def test_reconciliation_refreshes_dynamic_capabilities(controller):
     client = make_client(controller)
