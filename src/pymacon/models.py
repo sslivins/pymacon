@@ -193,6 +193,8 @@ class ControllerCapabilities:
     cooling_range: SetpointRange
     heating_range: SetpointRange
     hot_water_range: SetpointRange
+    ip_address: str | None = None
+    local_hostname: str | None = None
 
     @classmethod
     def from_dict(
@@ -205,6 +207,7 @@ class ControllerCapabilities:
         limits = _mapping(
             data.get("setpoint_limits_c"), "setpoint_limits_c"
         )
+        network = _optional_mapping(data.get("network"), "network")
         setpoint_controls_data = _optional_mapping(
             capabilities.get("setpoint_controls"),
             "capabilities.setpoint_controls",
@@ -271,6 +274,12 @@ class ControllerCapabilities:
                     "setpoint_limits_c.hot_water",
                 ),
                 "setpoint_limits_c.hot_water",
+            ),
+            ip_address=_optional_string(
+                network.get("ip_address"), "network.ip_address"
+            ),
+            local_hostname=_optional_string(
+                network.get("local_hostname"), "network.local_hostname"
             ),
         )
 

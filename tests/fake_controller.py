@@ -212,6 +212,10 @@ class FakeController:
                 "heating": {"min": 20, "max": 60},
                 "hot_water": {"min": 20, "max": 60},
             },
+            "network": {
+                "ip_address": "192.168.1.21",
+                "local_hostname": "arctic-e540.local",
+            },
         }
 
     def _authorized(self, request: web.Request) -> bool:
