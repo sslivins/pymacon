@@ -321,6 +321,21 @@ class ReadingState:
     power_w: float
     thermal_w: float
     cop: float | None
+    # Added in controller firmware after the fields above, so these must stay
+    # optional with defaults: a device on older firmware simply omits them.
+    #
+    # None means "not read", NOT zero. The controller deliberately sends null
+    # rather than 0 for these because 0 is a legitimate measured value for all
+    # of them - in particular 0 EEV steps means the valve is fully CLOSED, a
+    # real and alarming state. Callers must pass None straight through so it
+    # surfaces as unavailable/unknown instead of a fabricated zero.
+    #
+    # primary_eev is raw steps. The mainboard publishes no full-scale step
+    # count, so it cannot be converted to a percentage.
+    primary_eev: float | None = None
+    ac_voltage: float | None = None
+    ac_current: float | None = None
+    dc_voltage: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -450,6 +465,25 @@ class ControllerState:
                 ),
                 cop=_optional_number(
                     readings.get("cop"), "state.readings.cop"
+                ),
+                # _optional_number, never _number: these keys are absent on
+                # older firmware and explicitly null when the register has not
+                # been read. _number would raise ArcticProtocolError, which the
+                # Home Assistant integration turns into ConfigEntryNotReady,
+                # making every entity unavailable. Firmware can also move
+                # backwards at any time because the controller does A/B OTA
+                # with rollback, so tolerating the older shape is permanent.
+                primary_eev=_optional_number(
+                    readings.get("primary_eev"), "state.readings.primary_eev"
+                ),
+                ac_voltage=_optional_number(
+                    readings.get("ac_voltage"), "state.readings.ac_voltage"
+                ),
+                ac_current=_optional_number(
+                    readings.get("ac_current"), "state.readings.ac_current"
+                ),
+                dc_voltage=_optional_number(
+                    readings.get("dc_voltage"), "state.readings.dc_voltage"
                 ),
             ),
             error=ErrorState(

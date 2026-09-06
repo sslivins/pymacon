@@ -134,6 +134,57 @@ def test_capabilities_tolerate_missing_setpoint_controls(controller):
     assert caps.setpoint_controls.hot_water is False
 
 
+def test_readings_tolerate_firmware_without_the_new_keys(controller):
+    """Older firmware omits these keys entirely; parsing must not fail."""
+    state = ControllerState.from_dict(controller.snapshot()["state"])
+
+    assert state.readings.primary_eev is None
+    assert state.readings.ac_voltage is None
+    assert state.readings.ac_current is None
+    assert state.readings.dc_voltage is None
+    # The pre-existing fields must still parse normally.
+    assert state.readings.cop == 3.42
+
+
+def test_readings_accept_explicit_nulls(controller):
+    """The controller sends null when a register has not been read."""
+    data = controller.snapshot()["state"]
+    data["readings"].update(
+        primary_eev=None, ac_voltage=None, ac_current=None, dc_voltage=None
+    )
+
+    state = ControllerState.from_dict(data)
+
+    assert state.readings.primary_eev is None
+    assert state.readings.dc_voltage is None
+
+
+def test_readings_parse_the_new_keys(controller):
+    data = controller.snapshot()["state"]
+    data["readings"].update(
+        primary_eev=350, ac_voltage=236, ac_current=5, dc_voltage=380.0
+    )
+
+    state = ControllerState.from_dict(data)
+
+    assert state.readings.primary_eev == 350
+    assert state.readings.ac_voltage == 236
+    assert state.readings.ac_current == 5
+    assert state.readings.dc_voltage == 380.0
+
+
+def test_zero_eev_is_a_real_value_not_unknown(controller):
+    """0 steps means the valve is fully CLOSED, which is not the same as
+    'not read'. The two must never collapse onto each other."""
+    data = controller.snapshot()["state"]
+    data["readings"]["primary_eev"] = 0
+
+    state = ControllerState.from_dict(data)
+
+    assert state.readings.primary_eev == 0
+    assert state.readings.primary_eev is not None
+
+
 def test_capabilities_default_missing_setpoint_flags(controller):
     data = controller.capabilities()
     data["capabilities"]["setpoint_controls"] = {"cooling": True}
