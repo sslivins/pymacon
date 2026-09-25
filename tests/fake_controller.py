@@ -58,6 +58,45 @@ class FakeController:
             "build_sha": "deadbeef",
         }
         self.ota_started = False
+        self.supports_diagnostics = True
+        self.restart_requests: list[dict[str, Any]] = []
+        self.restart_unavailable = False
+        self.diagnostics: dict[str, Any] = {
+            "uptime_ms": 123456,
+            "system": {
+                "last_reset_reason": "power_on",
+                "brownout_count": 2,
+                "panic_count": 0,
+                "watchdog_count": 1,
+                "crash_streak": 0,
+                "safe_mode": False,
+            },
+            "memory": {
+                "internal_free_bytes": 90000,
+                "internal_min_free_bytes": 60000,
+                "internal_largest_free_block_bytes": 40000,
+            },
+            "wifi": {
+                "connected": True,
+                "ssid": "home",
+                "rssi_dbm": -61,
+                "disconnect_count": 3,
+                "last_disconnect_reason": 8,
+            },
+            "time": {"synced": True},
+            "ota": {"busy": False, "pending_verify": False},
+            "rs485": {
+                "role": "master",
+                "last_ok_uptime_ms": 123000,
+                "polls_ok": 500,
+                "polls_no_response": 4,
+                "polls_transport_error": 1,
+                "checksum_errors": 2,
+                "consecutive_failures": 0,
+                "writes_ok": 7,
+                "writes_failed": 1,
+            },
+        }
         self._temp_path = temp_path
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
@@ -80,6 +119,8 @@ class FakeController:
         app.router.add_put("/api/v1/control/power", self._power)
         app.router.add_put("/api/v1/control/mode", self._mode)
         app.router.add_put("/api/v1/control/setpoint", self._setpoint)
+        app.router.add_get("/api/v1/diagnostics", self._diagnostics)
+        app.router.add_post("/api/v1/control/restart", self._restart)
         app.router.add_get("/api/ota/releases", self._ota_releases)
         app.router.add_get("/api/ota/status", self._ota_status)
         app.router.add_post("/api/ota/github", self._ota_github)
@@ -206,6 +247,11 @@ class FakeController:
                     "heating": True,
                     "hot_water": True,
                 },
+                **(
+                    {"diagnostics": True, "restart": True}
+                    if self.supports_diagnostics
+                    else {}
+                ),
             },
             "setpoint_limits_c": {
                 "cooling": {"min": 5, "max": 30},
@@ -308,6 +354,40 @@ class FakeController:
             "setpoint",
             (("kind", body.get("kind")), ("value", body.get("value"))),
             body,
+        )
+
+    async def _diagnostics(self, request: web.Request) -> web.Response:
+        if not self.supports_diagnostics:
+            return web.json_response({"error": "not found"}, status=404)
+        if not self._authorized(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        return web.json_response(
+            {
+                "protocol_version": 1,
+                "device_id": self.device_id,
+                "boot_id": self.boot_id,
+                "diagnostics": self.diagnostics,
+            }
+        )
+
+    async def _restart(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        body = await request.json()
+        self.restart_requests.append(body)
+        if set(body) != {"command_id", "boot_id"}:
+            return web.json_response({"error": "invalid command"}, status=422)
+        if body["boot_id"] != self.boot_id:
+            return web.json_response({"error": "stale boot_id"}, status=409)
+        if self.restart_unavailable:
+            return web.json_response({"error": "ota busy"}, status=503)
+        return web.json_response(
+            {
+                "accepted": True,
+                "command_id": body["command_id"],
+                "status": "restarting",
+            },
+            status=202,
         )
 
     async def _ota_releases(self, request: web.Request) -> web.Response:

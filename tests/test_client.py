@@ -10,12 +10,15 @@ from fake_controller import FakeController, wait_for
 
 from pymacon import (
     ControllerCapabilities,
+    ControllerDiagnostics,
     ControllerState,
     MaconAuthenticationError,
     MaconCertificateError,
     MaconClient,
     MaconCommandConflictError,
     MaconCommandValidationError,
+    MaconConnectionError,
+    MaconControlUnavailableError,
     MaconPairingError,
     MaconProtocolError,
     OtaReleaseInfo,
@@ -649,3 +652,127 @@ def test_error_state_back_compat_without_new_fields():
     assert state.error.code is None
     assert state.error.name is None
     assert state.error.severity is None
+
+
+@pytest.mark.asyncio
+async def test_capabilities_advertise_diagnostics_and_restart(controller):
+    client = make_client(controller)
+    await client.async_setup()
+    assert client.capabilities.diagnostics is True
+    assert client.capabilities.restart is True
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_capabilities_default_diagnostics_off_for_old_firmware(
+    controller,
+):
+    controller.supports_diagnostics = False
+    client = make_client(controller)
+    await client.async_setup()
+    assert client.capabilities.diagnostics is False
+    assert client.capabilities.restart is False
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_fetch_diagnostics_parses_master_document(controller):
+    client = make_client(controller)
+    await client.async_setup()
+    diagnostics = await client.async_fetch_diagnostics()
+    assert isinstance(diagnostics, ControllerDiagnostics)
+    assert diagnostics.boot_id == controller.boot_id
+    assert diagnostics.uptime_ms == 123456
+    assert diagnostics.last_reset_reason == "power_on"
+    assert diagnostics.brownout_count == 2
+    assert diagnostics.watchdog_count == 1
+    assert diagnostics.safe_mode is False
+    assert diagnostics.wifi_ssid == "home"
+    assert diagnostics.wifi_rssi_dbm == -61
+    assert diagnostics.wifi_disconnect_count == 3
+    assert diagnostics.time_synced is True
+    assert diagnostics.bus_role == "master"
+    assert diagnostics.bus_polls_ok == 500
+    assert diagnostics.bus_writes_failed == 1
+    assert diagnostics.bus_frames_ok is None
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_fetch_diagnostics_tolerates_missing_and_malformed_fields(
+    controller,
+):
+    controller.diagnostics = {
+        "uptime_ms": -5,
+        "system": "nope",
+        "wifi": {"connected": "yes", "ssid": None, "rssi_dbm": True},
+        "rs485": {"role": "future_role", "frames_ok": 9, "resyncs": 1},
+    }
+    client = make_client(controller)
+    await client.async_setup()
+    diagnostics = await client.async_fetch_diagnostics()
+    assert diagnostics.uptime_ms is None
+    assert diagnostics.brownout_count is None
+    assert diagnostics.wifi_connected is None
+    assert diagnostics.wifi_ssid is None
+    assert diagnostics.wifi_rssi_dbm is None
+    assert diagnostics.bus_role == "future_role"
+    assert diagnostics.bus_frames_ok == 9
+    assert diagnostics.bus_polls_ok is None
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_fetch_diagnostics_failure_does_not_mark_unavailable(
+    controller,
+):
+    controller.supports_diagnostics = False
+    client = make_client(controller)
+    await client.async_setup()
+    with pytest.raises(MaconConnectionError):
+        await client.async_fetch_diagnostics()
+    assert client.available is True
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_fetch_diagnostics_rejects_other_device(controller):
+    client = make_client(controller)
+    await client.async_setup()
+    controller.device_id = "arctic-aabbccddeeff"
+    with pytest.raises(MaconProtocolError):
+        await client.async_fetch_diagnostics()
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_restart_names_current_boot(controller):
+    client = make_client(controller)
+    await client.async_setup()
+    result = await client.async_restart(command_id="restart-1")
+    assert result.accepted is True
+    assert result.command_id == "restart-1"
+    assert result.status == "restarting"
+    assert controller.restart_requests == [
+        {"command_id": "restart-1", "boot_id": controller.boot_id}
+    ]
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_restart_with_stale_boot_is_conflict(controller):
+    client = make_client(controller)
+    await client.async_setup()
+    with pytest.raises(MaconCommandConflictError):
+        await client.async_restart(boot_id="f" * 32)
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_restart_during_ota_is_unavailable(controller):
+    controller.restart_unavailable = True
+    client = make_client(controller)
+    await client.async_setup()
+    with pytest.raises(MaconControlUnavailableError):
+        await client.async_restart()
+    await client.stop()

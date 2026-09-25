@@ -31,6 +31,7 @@ from .models import (
     ClientStatus,
     CommandResult,
     ControllerCapabilities,
+    ControllerDiagnostics,
     HelloMessage,
     OtaReleaseInfo,
     OtaStatus,
@@ -509,6 +510,58 @@ class ArcticControllerClient:
             "hot_water", value, command_id=command_id
         )
 
+    async def async_fetch_diagnostics(self) -> ControllerDiagnostics:
+        """Return controller (not heat-pump) health diagnostics.
+
+        Polled on its own cadence rather than pushed: the values change
+        continuously and are deliberately kept out of the revisioned state
+        snapshot. A failure here does not change :attr:`available`, so a
+        diagnostics outage never takes the heat-pump entities down. Check
+        ``capabilities.diagnostics`` first; older firmware answers 404.
+        """
+        data = await self._get_json("/api/v1/diagnostics")
+        diagnostics = ControllerDiagnostics.from_dict(data)
+        self._validate_identity(
+            diagnostics.protocol_version, diagnostics.device_id
+        )
+        return diagnostics
+
+    async def async_restart(
+        self,
+        *,
+        boot_id: str | None = None,
+        command_id: str | None = None,
+    ) -> CommandResult:
+        """Ask the controller to reboot.
+
+        The request names the boot being restarted (default: the boot of the
+        latest accepted snapshot), so a retry that arrives after the reboot is
+        rejected with :class:`ArcticCommandConflictError` rather than
+        restarting the controller a second time.
+
+        Raises:
+            ArcticControlUnavailableError: an OTA update is in progress or a
+                new image has not been verified yet.
+            ArcticCommandConflictError: ``boot_id`` is not the current boot.
+        """
+        if boot_id is None:
+            snapshot = self._snapshot
+            if snapshot is None:
+                snapshot = await self.fetch_state()
+            boot_id = snapshot.boot_id
+        if not isinstance(boot_id, str) or not boot_id:
+            raise ValueError("boot_id must be a non-empty string")
+        payload = {"command_id": self._command_id(command_id), "boot_id": boot_id}
+        data = await self._post_json(
+            "/api/v1/control/restart", payload, unavailable_status=True
+        )
+        result = CommandResult.from_dict(data)
+        if not result.accepted or result.command_id != payload["command_id"]:
+            raise ArcticProtocolError(
+                "restart returned an invalid command acknowledgement"
+            )
+        return result
+
     async def async_check_updates(self) -> OtaReleaseInfo:
         """Ask the controller to check GitHub for a newer firmware release.
 
@@ -658,7 +711,11 @@ class ArcticControllerClient:
         return result
 
     async def _post_json(
-        self, path: str, payload: Mapping[str, Any] | None = None
+        self,
+        path: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        unavailable_status: bool = False,
     ) -> Mapping[str, Any]:
         session = await self._ensure_session()
         try:
@@ -681,6 +738,10 @@ class ArcticControllerClient:
                     raise ArcticCommandValidationError(
                         await self._error_message(response)
                     )
+                if unavailable_status and response.status == 503:
+                    raise ArcticControlUnavailableError(
+                        await self._error_message(response)
+                    )
                 if response.status not in (200, 202):
                     message = await self._error_message(response)
                     raise ArcticConnectionError(
@@ -692,6 +753,7 @@ class ArcticControllerClient:
             ArcticAuthenticationError,
             ArcticCommandConflictError,
             ArcticCommandValidationError,
+            ArcticControlUnavailableError,
             ArcticConnectionError,
         ):
             raise
