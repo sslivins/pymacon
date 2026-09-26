@@ -195,6 +195,8 @@ class ControllerCapabilities:
     hot_water_range: SetpointRange
     ip_address: str | None = None
     local_hostname: str | None = None
+    diagnostics: bool = False
+    restart: bool = False
 
     @classmethod
     def from_dict(
@@ -277,6 +279,14 @@ class ControllerCapabilities:
             ),
             ip_address=_optional_string(
                 network.get("ip_address"), "network.ip_address"
+            ),
+            diagnostics=_boolean_default(
+                capabilities.get("diagnostics"),
+                "capabilities.diagnostics",
+            ),
+            restart=_boolean_default(
+                capabilities.get("restart"),
+                "capabilities.restart",
             ),
             local_hostname=_optional_string(
                 network.get("local_hostname"), "network.local_hostname"
@@ -633,4 +643,129 @@ class OtaStatus:
             new_version=_clean_string(data.get("new_version")),
             pending_verify=bool(data.get("pending_verify", False)),
             error=_clean_string(data.get("error")),
+        )
+
+
+def _opt_count(value: Any) -> int | None:
+    """Lenient non-negative integer: None when missing or malformed."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return int(value)
+
+
+def _opt_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return int(value)
+
+
+def _opt_bool(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _opt_mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+@dataclass(frozen=True, slots=True)
+class ControllerDiagnostics:
+    """Controller (not heat-pump) health from ``GET /api/v1/diagnostics``.
+
+    Identity fields are validated strictly; every health field is parsed
+    leniently and is ``None`` when absent or malformed, because a rolled-back
+    firmware may not report it. RS485 counters are per boot; the brownout,
+    panic and watchdog counts are lifetime values persisted by the controller.
+    ``bus_*`` counters are role-specific: the ``poll``/``write`` counters exist
+    only when ``bus_role == "master"`` and ``frames_ok``/``resyncs`` only when
+    it is ``"listener"``.
+    """
+
+    protocol_version: int
+    device_id: str
+    boot_id: str
+    uptime_ms: int | None = None
+    last_reset_reason: str | None = None
+    brownout_count: int | None = None
+    panic_count: int | None = None
+    watchdog_count: int | None = None
+    crash_streak: int | None = None
+    safe_mode: bool | None = None
+    internal_free_bytes: int | None = None
+    internal_min_free_bytes: int | None = None
+    internal_largest_free_block_bytes: int | None = None
+    wifi_connected: bool | None = None
+    wifi_ssid: str | None = None
+    wifi_rssi_dbm: int | None = None
+    wifi_disconnect_count: int | None = None
+    wifi_last_disconnect_reason: int | None = None
+    time_synced: bool | None = None
+    ota_busy: bool | None = None
+    ota_pending_verify: bool | None = None
+    bus_role: str | None = None
+    bus_last_ok_uptime_ms: int | None = None
+    bus_polls_ok: int | None = None
+    bus_polls_no_response: int | None = None
+    bus_polls_transport_error: int | None = None
+    bus_checksum_errors: int | None = None
+    bus_consecutive_failures: int | None = None
+    bus_writes_ok: int | None = None
+    bus_writes_failed: int | None = None
+    bus_frames_ok: int | None = None
+    bus_resyncs: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ControllerDiagnostics:
+        data = _mapping(data, "diagnostics response")
+        diag = _opt_mapping(data.get("diagnostics"))
+        system = _opt_mapping(diag.get("system"))
+        memory = _opt_mapping(diag.get("memory"))
+        wifi = _opt_mapping(diag.get("wifi"))
+        time = _opt_mapping(diag.get("time"))
+        ota = _opt_mapping(diag.get("ota"))
+        bus = _opt_mapping(diag.get("rs485"))
+        return cls(
+            protocol_version=_integer(
+                data.get("protocol_version"), "protocol_version", minimum=1
+            ),
+            device_id=_string(data.get("device_id"), "device_id"),
+            boot_id=_string(data.get("boot_id"), "boot_id"),
+            uptime_ms=_opt_count(diag.get("uptime_ms")),
+            last_reset_reason=_clean_string(system.get("last_reset_reason")),
+            brownout_count=_opt_count(system.get("brownout_count")),
+            panic_count=_opt_count(system.get("panic_count")),
+            watchdog_count=_opt_count(system.get("watchdog_count")),
+            crash_streak=_opt_count(system.get("crash_streak")),
+            safe_mode=_opt_bool(system.get("safe_mode")),
+            internal_free_bytes=_opt_count(memory.get("internal_free_bytes")),
+            internal_min_free_bytes=_opt_count(
+                memory.get("internal_min_free_bytes")
+            ),
+            internal_largest_free_block_bytes=_opt_count(
+                memory.get("internal_largest_free_block_bytes")
+            ),
+            wifi_connected=_opt_bool(wifi.get("connected")),
+            wifi_ssid=_clean_string(wifi.get("ssid")),
+            wifi_rssi_dbm=_opt_int(wifi.get("rssi_dbm")),
+            wifi_disconnect_count=_opt_count(wifi.get("disconnect_count")),
+            wifi_last_disconnect_reason=_opt_count(
+                wifi.get("last_disconnect_reason")
+            ),
+            time_synced=_opt_bool(time.get("synced")),
+            ota_busy=_opt_bool(ota.get("busy")),
+            ota_pending_verify=_opt_bool(ota.get("pending_verify")),
+            bus_role=_clean_string(bus.get("role")),
+            bus_last_ok_uptime_ms=_opt_count(bus.get("last_ok_uptime_ms")),
+            bus_polls_ok=_opt_count(bus.get("polls_ok")),
+            bus_polls_no_response=_opt_count(bus.get("polls_no_response")),
+            bus_polls_transport_error=_opt_count(
+                bus.get("polls_transport_error")
+            ),
+            bus_checksum_errors=_opt_count(bus.get("checksum_errors")),
+            bus_consecutive_failures=_opt_count(
+                bus.get("consecutive_failures")
+            ),
+            bus_writes_ok=_opt_count(bus.get("writes_ok")),
+            bus_writes_failed=_opt_count(bus.get("writes_failed")),
+            bus_frames_ok=_opt_count(bus.get("frames_ok")),
+            bus_resyncs=_opt_count(bus.get("resyncs")),
         )
