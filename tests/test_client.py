@@ -23,6 +23,7 @@ from pymacon import (
     MaconProtocolError,
     OtaReleaseInfo,
     OtaStatus,
+    StateSnapshot,
 )
 
 
@@ -265,6 +266,63 @@ async def test_reconciliation_refreshes_dynamic_capabilities(controller):
         and not client.capabilities.control_mode
     )
     assert changes[-1].supported_modes == ()
+    await client.stop()
+
+
+def test_device_name_is_parsed_from_capabilities_and_snapshot(controller):
+    controller.device_name = "Heat Pump 1 \u2013 Radiant Floor"
+
+    caps = ControllerCapabilities.from_dict(controller.capabilities())
+    snapshot = StateSnapshot.from_dict(controller.snapshot())
+
+    assert caps.device_name == "Heat Pump 1 \u2013 Radiant Floor"
+    assert snapshot.device_name == "Heat Pump 1 \u2013 Radiant Floor"
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_unset_device_name_is_none(controller, value):
+    caps_data = controller.capabilities()
+    snap_data = controller.snapshot()
+    caps_data["device_name"] = value
+    snap_data["device_name"] = value
+
+    assert ControllerCapabilities.from_dict(caps_data).device_name is None
+    assert StateSnapshot.from_dict(snap_data).device_name is None
+
+
+def test_older_firmware_without_device_name_is_accepted(controller):
+    caps_data = controller.capabilities()
+    snap_data = controller.snapshot()
+    del caps_data["device_name"]
+    del snap_data["device_name"]
+
+    assert ControllerCapabilities.from_dict(caps_data).device_name is None
+    assert StateSnapshot.from_dict(snap_data).device_name is None
+
+
+def test_non_string_device_name_is_rejected(controller):
+    data = controller.snapshot()
+    data["device_name"] = 42
+
+    with pytest.raises(MaconProtocolError):
+        StateSnapshot.from_dict(data)
+
+
+@pytest.mark.asyncio
+async def test_pushed_rename_reaches_subscribers(controller):
+    client = make_client(controller)
+    received = []
+    client.subscribe(received.append)
+    await client.start()
+    await wait_for(lambda: client.stream_connected)
+
+    await controller.rename("Garage Heat Pump")
+    await wait_for(
+        lambda: received and received[-1].device_name == "Garage Heat Pump"
+    )
+
+    await controller.rename(None)
+    await wait_for(lambda: received[-1].device_name is None)
     await client.stop()
 
 
@@ -621,6 +679,7 @@ def _state_payload(**error_fields):
     controller.device_id = "arctic-abcdef012345"
     controller.boot_id = "boot"
     controller.revision = 1
+    controller.device_name = None
     controller.tank_temperature = 40
     payload = controller.snapshot()["state"]
     payload["error"] = error_fields

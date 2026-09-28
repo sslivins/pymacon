@@ -69,6 +69,15 @@ def _optional_string(value: Any, name: str) -> str | None:
     return _string(value, name)
 
 
+def _optional_name(value: Any, name: str) -> str | None:
+    """A user-set label: absent, null, or blank all mean "not set"."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ArcticProtocolError(f"{name} must be a string or null")
+    return value.strip() or None
+
+
 def _optional_number(value: Any, name: str) -> float | None:
     if value is None:
         return None
@@ -197,6 +206,8 @@ class ControllerCapabilities:
     local_hostname: str | None = None
     diagnostics: bool = False
     restart: bool = False
+    # The friendly name the user gave the controller, or None if unset.
+    device_name: str | None = None
 
     @classmethod
     def from_dict(
@@ -291,6 +302,7 @@ class ControllerCapabilities:
             local_hostname=_optional_string(
                 network.get("local_hostname"), "network.local_hostname"
             ),
+            device_name=_optional_name(data.get("device_name"), "device_name"),
         )
 
 
@@ -526,6 +538,8 @@ class StateSnapshot:
     revision: int
     captured_at_ms: int
     state: ControllerState
+    # The friendly name the user gave the controller, or None if unset.
+    device_name: str | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> StateSnapshot:
@@ -546,6 +560,7 @@ class StateSnapshot:
             state=ControllerState.from_dict(
                 _mapping(data.get("state"), "state")
             ),
+            device_name=_optional_name(data.get("device_name"), "device_name"),
         )
 
 
