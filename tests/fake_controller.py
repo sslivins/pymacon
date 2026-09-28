@@ -32,6 +32,7 @@ class FakeController:
         self.pairing_code = pairing_code
         self.boot_id = "1" * 32
         self.revision = 1
+        self.device_name: str | None = None
         self.tank_temperature = 40.0
         self.state_requests = 0
         self.websocket_connections = 0
@@ -158,6 +159,11 @@ class FakeController:
         self.revision += revision_step
         await self.push_state()
 
+    async def rename(self, name: str | None) -> None:
+        self.device_name = name
+        self.revision += 1
+        await self.push_state()
+
     async def reboot(self) -> None:
         self.boot_id = "2" * 32
         self.revision = 1
@@ -180,6 +186,7 @@ class FakeController:
             "boot_id": self.boot_id,
             "revision": self.revision,
             "captured_at_ms": self.revision * 100,
+            "device_name": self.device_name,
             "state": {
                 "connected": True,
                 "unit_on": True,
@@ -225,6 +232,7 @@ class FakeController:
         return {
             "protocol_version": 1,
             "device_id": self.device_id,
+            "device_name": self.device_name,
             "model": "Macon Heat Pump Controller",
             "firmware_version": "test",
             "transports": {"rest": True, "websocket": True},
