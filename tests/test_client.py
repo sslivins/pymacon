@@ -635,6 +635,7 @@ def test_error_state_parses_enriched_fields():
             name="Water flow fault",
             description="Water flow switch open",
             severity="critical",
+            help_url="https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838",
         )
     )
     assert state.error.active is True
@@ -642,6 +643,9 @@ def test_error_state_parses_enriched_fields():
     assert state.error.name == "Water flow fault"
     assert state.error.description == "Water flow switch open"
     assert state.error.severity == "critical"
+    assert state.error.help_url == (
+        "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838"
+    )
 
 
 def test_error_state_back_compat_without_new_fields():
@@ -652,6 +656,7 @@ def test_error_state_back_compat_without_new_fields():
     assert state.error.code is None
     assert state.error.name is None
     assert state.error.severity is None
+    assert state.error.help_url is None
 
 
 @pytest.mark.asyncio

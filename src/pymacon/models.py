@@ -355,6 +355,7 @@ class ErrorState:
     code: str | None = None
     name: str | None = None
     severity: str | None = None
+    help_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -509,6 +510,9 @@ class ControllerState:
                 ),
                 severity=_optional_string(
                     error.get("severity"), "state.error.severity"
+                ),
+                help_url=_optional_string(
+                    error.get("help_url"), "state.error.help_url"
                 ),
             ),
         )
