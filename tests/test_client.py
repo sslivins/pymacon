@@ -189,6 +189,48 @@ def test_zero_eev_is_a_real_value_not_unknown(controller):
     assert state.readings.primary_eev is not None
 
 
+def test_performance_inputs_and_trends_absent_on_older_firmware(controller):
+    state = ControllerState.from_dict(controller.snapshot()["state"])
+
+    assert state.readings.flow_lpm is None
+    assert state.readings.perf_source is None
+    assert state.readings.perf_fallback is None
+    assert state.trends is None
+
+
+def test_performance_inputs_and_trends_parse(controller):
+    data = controller.snapshot()["state"]
+    data["readings"].update(
+        flow_lpm=42.5, perf_source="external", perf_fallback=False
+    )
+    data["trends"] = {"tank": "rising", "outlet": "steady", "inlet": "unknown"}
+
+    state = ControllerState.from_dict(data)
+
+    assert state.readings.flow_lpm == 42.5
+    assert state.readings.perf_source == "external"
+    assert state.readings.perf_fallback is False
+    assert state.trends is not None
+    assert state.trends.tank == "rising"
+    assert state.trends.outlet == "steady"
+    assert state.trends.inlet is None  # "unknown" means no direction yet
+
+
+def test_malformed_trends_never_break_the_snapshot(controller):
+    data = controller.snapshot()["state"]
+    data["trends"] = {"tank": 5, "outlet": "sideways"}
+    state = ControllerState.from_dict(data)
+    assert state.trends is not None
+    assert (state.trends.tank, state.trends.outlet, state.trends.inlet) == (
+        None,
+        None,
+        None,
+    )
+
+    data["trends"] = "rising"
+    assert ControllerState.from_dict(data).trends is None
+
+
 def test_capabilities_default_missing_setpoint_flags(controller):
     data = controller.capabilities()
     data["capabilities"]["setpoint_controls"] = {"cooling": True}

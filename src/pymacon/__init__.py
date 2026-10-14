@@ -34,6 +34,7 @@ from .models import (
     SetpointState,
     StateSnapshot,
     TemperatureState,
+    TrendState,
 )
 
 # Keep the protocol-era names available while presenting Macon names to new
@@ -91,4 +92,5 @@ __all__ = [
     "StateSnapshot",
     "StatusCallback",
     "TemperatureState",
+    "TrendState",
 ]
