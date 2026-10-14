@@ -358,7 +358,38 @@ class ReadingState:
     ac_voltage: float | None = None
     ac_current: float | None = None
     dc_voltage: float | None = None
+    # Performance (COP) inputs. flow_lpm is the configured loop flow, not a
+    # measurement. perf_source is "external" (pipe sensors) or "heat_pump"
+    # (the unit's own water sensors); perf_fallback means an external sensor
+    # is failing and the unit's sensors are being used instead.
+    flow_lpm: float | None = None
+    perf_source: str | None = None
+    perf_fallback: bool | None = None
 
+
+TREND_VALUES = ("rising", "falling", "steady")
+
+
+@dataclass(frozen=True, slots=True)
+class TrendState:
+    """Direction of the water temperatures; None while unknown."""
+
+    tank: str | None = None
+    outlet: str | None = None
+    inlet: str | None = None
+
+    @classmethod
+    def from_value(cls, value: Any) -> TrendState | None:
+        # Absent on firmware before 3.2.8. Parsed leniently: a trend is a
+        # display hint and must never make a snapshot unparseable.
+        if not isinstance(value, Mapping):
+            return None
+
+        def one(key: str) -> str | None:
+            item = value.get(key)
+            return item if item in TREND_VALUES else None
+
+        return cls(tank=one("tank"), outlet=one("outlet"), inlet=one("inlet"))
 
 @dataclass(frozen=True, slots=True)
 class ErrorState:
@@ -382,6 +413,7 @@ class ControllerState:
     setpoints_c: SetpointState
     readings: ReadingState
     error: ErrorState
+    trends: TrendState | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ControllerState:
@@ -508,7 +540,13 @@ class ControllerState:
                 dc_voltage=_optional_number(
                     readings.get("dc_voltage"), "state.readings.dc_voltage"
                 ),
+                flow_lpm=_optional_number(
+                    readings.get("flow_lpm"), "state.readings.flow_lpm"
+                ),
+                perf_source=_clean_string(readings.get("perf_source")),
+                perf_fallback=_opt_bool(readings.get("perf_fallback")),
             ),
+            trends=TrendState.from_value(data.get("trends")),
             error=ErrorState(
                 active=_boolean(error.get("active"), "state.error.active"),
                 description=_optional_string(
