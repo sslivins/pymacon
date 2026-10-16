@@ -231,6 +231,48 @@ def test_malformed_trends_never_break_the_snapshot(controller):
     assert ControllerState.from_dict(data).trends is None
 
 
+def test_energy_totals_absent_on_older_firmware_or_before_load(controller):
+    data = controller.snapshot()["state"]
+    assert ControllerState.from_dict(data).energy is None
+    data["energy"] = None
+    assert ControllerState.from_dict(data).energy is None
+
+
+def test_energy_totals_parse(controller):
+    data = controller.snapshot()["state"]
+    data["energy"] = {
+        "reset_id": "1a2b3c4d",
+        "electrical_wh": 16402,
+        "thermal_wh": {"heating": 18692, "cooling": 0, "hot_water": 250},
+    }
+    energy = ControllerState.from_dict(data).energy
+    assert energy is not None
+    assert energy.reset_id == "1a2b3c4d"
+    assert energy.electrical_wh == 16402
+    assert (energy.heating_wh, energy.cooling_wh, energy.hot_water_wh) == (18692, 0, 250)
+
+    data["energy"]["reset_id"] = None
+    energy = ControllerState.from_dict(data).energy
+    assert energy is not None and energy.reset_id is None
+
+
+@pytest.mark.parametrize(
+    "energy",
+    [
+        "16402",
+        {"reset_id": 5, "electrical_wh": 1, "thermal_wh": {"heating": 0, "cooling": 0, "hot_water": 0}},
+        {"reset_id": None, "electrical_wh": -1, "thermal_wh": {"heating": 0, "cooling": 0, "hot_water": 0}},
+        {"reset_id": None, "electrical_wh": True, "thermal_wh": {"heating": 0, "cooling": 0, "hot_water": 0}},
+        {"reset_id": None, "electrical_wh": 1, "thermal_wh": {"heating": 0, "cooling": 0}},
+        {"reset_id": None, "electrical_wh": 1},
+    ],
+)
+def test_malformed_energy_totals_are_dropped(controller, energy):
+    data = controller.snapshot()["state"]
+    data["energy"] = energy
+    assert ControllerState.from_dict(data).energy is None
+
+
 def test_capabilities_default_missing_setpoint_flags(controller):
     data = controller.capabilities()
     data["capabilities"]["setpoint_controls"] = {"cooling": True}

@@ -391,6 +391,58 @@ class TrendState:
 
         return cls(tank=one("tank"), outlet=one("outlet"), inlet=one("inlet"))
 
+
+@dataclass(frozen=True, slots=True)
+class EnergyTotals:
+    """Running energy totals since install or factory reset, in Wh.
+
+    Values only grow while ``reset_id`` stays the same; a new ``reset_id``
+    means the controller's store started over. ``reset_id`` is None until the
+    controller has saved its first day, and the counter carries on from there
+    (None to an id is not a reset).
+    """
+
+    reset_id: str | None
+    electrical_wh: int
+    heating_wh: int
+    cooling_wh: int
+    hot_water_wh: int
+
+    @classmethod
+    def from_value(cls, value: Any) -> EnergyTotals | None:
+        # Absent on firmware before 3.4.0, and null until the controller's
+        # energy ledger has loaded after boot. Malformed totals are dropped
+        # rather than guessed: a wrong value would corrupt a long-term
+        # statistic.
+        if not isinstance(value, Mapping):
+            return None
+        reset_id = value.get("reset_id")
+        if reset_id is not None and not isinstance(reset_id, str):
+            return None
+        thermal = value.get("thermal_wh")
+        if not isinstance(thermal, Mapping):
+            return None
+
+        def wh(item: Any) -> int | None:
+            if isinstance(item, bool) or not isinstance(item, int | float):
+                return None
+            return int(item) if item >= 0 else None
+
+        electrical = wh(value.get("electrical_wh"))
+        heating = wh(thermal.get("heating"))
+        cooling = wh(thermal.get("cooling"))
+        hot_water = wh(thermal.get("hot_water"))
+        if electrical is None or heating is None or cooling is None or hot_water is None:
+            return None
+        return cls(
+            reset_id=reset_id,
+            electrical_wh=electrical,
+            heating_wh=heating,
+            cooling_wh=cooling,
+            hot_water_wh=hot_water,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ErrorState:
     active: bool
@@ -414,6 +466,7 @@ class ControllerState:
     readings: ReadingState
     error: ErrorState
     trends: TrendState | None = None
+    energy: EnergyTotals | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ControllerState:
@@ -547,6 +600,7 @@ class ControllerState:
                 perf_fallback=_opt_bool(readings.get("perf_fallback")),
             ),
             trends=TrendState.from_value(data.get("trends")),
+            energy=EnergyTotals.from_value(data.get("energy")),
             error=ErrorState(
                 active=_boolean(error.get("active"), "state.error.active"),
                 description=_optional_string(
