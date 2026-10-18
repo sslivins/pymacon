@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 import aiohttp
 import pytest
@@ -843,6 +844,17 @@ async def test_fetch_diagnostics_parses_master_document(controller):
     assert diagnostics.bus_polls_ok == 500
     assert diagnostics.bus_writes_failed == 1
     assert diagnostics.bus_frames_ok is None
+    assert diagnostics.wifi_drops_total == 3
+    assert diagnostics.wifi_drops_short == 2
+    assert diagnostics.wifi_drops_long == 1
+    restored, lost = diagnostics.events
+    assert restored.type == "wifi_restored"
+    assert restored.details == {"down_s": 94}
+    assert lost.key == (77, 90_000, "wifi_lost")
+    assert lost.category == "problems"
+    assert lost.payload == 201
+    assert lost.timestamp == datetime(2026, 10, 14, 17, 47, 40, tzinfo=UTC)
+    assert lost.details == {"reason": 201, "reason_key": "network_not_found"}
     await client.stop()
 
 
@@ -855,6 +867,12 @@ async def test_fetch_diagnostics_tolerates_missing_and_malformed_fields(
         "system": "nope",
         "wifi": {"connected": "yes", "ssid": None, "rssi_dbm": True},
         "rs485": {"role": "future_role", "frames_ok": 9, "resyncs": 1},
+        "events": [
+            "nope",
+            {"type": "wifi_lost", "uptime_ms": 5},
+            {"type": "wifi_unstable", "boot_id": 1, "uptime_ms": 5,
+             "timestamp": 0, "drops": 3},
+        ],
     }
     client = make_client(controller)
     await client.async_setup()
@@ -864,6 +882,12 @@ async def test_fetch_diagnostics_tolerates_missing_and_malformed_fields(
     assert diagnostics.wifi_connected is None
     assert diagnostics.wifi_ssid is None
     assert diagnostics.wifi_rssi_dbm is None
+    assert diagnostics.wifi_drops_total is None
+    (unstable,) = diagnostics.events
+    assert unstable.timestamp is None
+    assert unstable.details == {"drops": 3}
+    controller.diagnostics = {"uptime_ms": 5}
+    assert (await client.async_fetch_diagnostics()).events is None
     assert diagnostics.bus_role == "future_role"
     assert diagnostics.bus_frames_ok == 9
     assert diagnostics.bus_polls_ok is None

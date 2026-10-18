@@ -48,10 +48,12 @@ Only controls advertised by `client.capabilities` should be called. The
 firmware rejects unavailable, unsafe, or unsupported operations.
 
 Controller health (uptime, reset reason, brownout/panic/watchdog counts,
-Wi-Fi and RS485 bus counters) is polled separately from the heat-pump state
-when `client.capabilities.diagnostics` is true. Every health field is
-optional. A restart names the current boot so a late retry cannot reboot the
-controller twice:
+Wi-Fi drop and RS485 bus counters) is polled separately from the heat-pump
+state when `client.capabilities.diagnostics` is true. Every health field is
+optional. `diagnostics.events` carries the controller's newest problem events
+(Wi-Fi and network outages, crashes and resets) as `ControllerEvent`s; use
+`event.key` to tell new ones from ones already seen. A restart names the
+current boot so a late retry cannot reboot the controller twice:
 
 ```python
 diagnostics = await client.async_fetch_diagnostics()

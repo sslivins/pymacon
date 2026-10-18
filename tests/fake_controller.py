@@ -83,6 +83,7 @@ class FakeController:
                 "rssi_dbm": -61,
                 "disconnect_count": 3,
                 "last_disconnect_reason": 8,
+                "drops": {"total": 3, "short": 2, "long": 1},
             },
             "time": {"synced": True},
             "ota": {"busy": False, "pending_verify": False},
@@ -97,6 +98,27 @@ class FakeController:
                 "writes_ok": 7,
                 "writes_failed": 1,
             },
+            "events": [
+                {
+                    "type": "wifi_restored",
+                    "category": "problems",
+                    "timestamp": 1_792_000_090,
+                    "boot_id": 77,
+                    "uptime_ms": 120_000,
+                    "payload": 94,
+                    "down_s": 94,
+                },
+                {
+                    "type": "wifi_lost",
+                    "category": "problems",
+                    "timestamp": 1_792_000_060,
+                    "boot_id": 77,
+                    "uptime_ms": 90_000,
+                    "payload": 201,
+                    "reason": 201,
+                    "reason_key": "network_not_found",
+                },
+            ],
         }
         self._temp_path = temp_path
         self._runner: web.AppRunner | None = None
