@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from .exceptions import ArcticProtocolError
@@ -778,6 +779,68 @@ def _opt_mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+_EVENT_BASE_FIELDS = frozenset(
+    {"type", "category", "timestamp", "boot_id", "uptime_ms", "payload"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ControllerEvent:
+    """One controller event-log entry, as reported in ``diagnostics.events``.
+
+    ``boot_id`` is the event log's numeric boot identifier (not the protocol
+    ``boot_id`` string). ``timestamp`` is None when the controller's clock was
+    not yet set. ``details`` holds the decoded, type-specific fields (for
+    example ``reason_key`` for ``wifi_lost`` or ``down_s`` for
+    ``wifi_restored``).
+    """
+
+    type: str
+    boot_id: int
+    uptime_ms: int
+    timestamp: datetime | None = None
+    category: str | None = None
+    payload: int | None = None
+    details: Mapping[str, Any] = field(default_factory=dict, hash=False)
+
+    @property
+    def key(self) -> tuple[int, int, str]:
+        """Stable identity of the event across polls and reboots."""
+        return (self.boot_id, self.uptime_ms, self.type)
+
+    @classmethod
+    def from_value(cls, value: Any) -> ControllerEvent | None:
+        """Parse leniently: None when the entry lacks its identity."""
+        if not isinstance(value, Mapping):
+            return None
+        event_type = _clean_string(value.get("type"))
+        boot_id = _opt_count(value.get("boot_id"))
+        uptime_ms = _opt_count(value.get("uptime_ms"))
+        if event_type is None or boot_id is None or uptime_ms is None:
+            return None
+        seconds = _opt_count(value.get("timestamp"))
+        return cls(
+            type=event_type,
+            boot_id=boot_id,
+            uptime_ms=uptime_ms,
+            timestamp=(
+                datetime.fromtimestamp(seconds, UTC) if seconds else None
+            ),
+            category=_clean_string(value.get("category")),
+            payload=_opt_count(value.get("payload")),
+            details={
+                k: v for k, v in value.items() if k not in _EVENT_BASE_FIELDS
+            },
+        )
+
+
+def _events(value: Any) -> tuple[ControllerEvent, ...] | None:
+    if not isinstance(value, list):
+        return None
+    events = (ControllerEvent.from_value(item) for item in value)
+    return tuple(event for event in events if event is not None)
+
+
 @dataclass(frozen=True, slots=True)
 class ControllerDiagnostics:
     """Controller (not heat-pump) health from ``GET /api/v1/diagnostics``.
@@ -809,6 +872,9 @@ class ControllerDiagnostics:
     wifi_rssi_dbm: int | None = None
     wifi_disconnect_count: int | None = None
     wifi_last_disconnect_reason: int | None = None
+    wifi_drops_total: int | None = None
+    wifi_drops_short: int | None = None
+    wifi_drops_long: int | None = None
     time_synced: bool | None = None
     ota_busy: bool | None = None
     ota_pending_verify: bool | None = None
@@ -823,6 +889,9 @@ class ControllerDiagnostics:
     bus_writes_failed: int | None = None
     bus_frames_ok: int | None = None
     bus_resyncs: int | None = None
+    # Newest controller problem events, newest first; None when the firmware
+    # doesn't report them (as opposed to an empty log).
+    events: tuple[ControllerEvent, ...] | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ControllerDiagnostics:
@@ -831,6 +900,7 @@ class ControllerDiagnostics:
         system = _opt_mapping(diag.get("system"))
         memory = _opt_mapping(diag.get("memory"))
         wifi = _opt_mapping(diag.get("wifi"))
+        drops = _opt_mapping(wifi.get("drops"))
         time = _opt_mapping(diag.get("time"))
         ota = _opt_mapping(diag.get("ota"))
         bus = _opt_mapping(diag.get("rs485"))
@@ -861,6 +931,9 @@ class ControllerDiagnostics:
             wifi_last_disconnect_reason=_opt_count(
                 wifi.get("last_disconnect_reason")
             ),
+            wifi_drops_total=_opt_count(drops.get("total")),
+            wifi_drops_short=_opt_count(drops.get("short")),
+            wifi_drops_long=_opt_count(drops.get("long")),
             time_synced=_opt_bool(time.get("synced")),
             ota_busy=_opt_bool(ota.get("busy")),
             ota_pending_verify=_opt_bool(ota.get("pending_verify")),
@@ -879,4 +952,5 @@ class ControllerDiagnostics:
             bus_writes_failed=_opt_count(bus.get("writes_failed")),
             bus_frames_ok=_opt_count(bus.get("frames_ok")),
             bus_resyncs=_opt_count(bus.get("resyncs")),
+            events=_events(diag.get("events")),
         )
