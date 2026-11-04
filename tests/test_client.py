@@ -144,6 +144,7 @@ def test_readings_tolerate_firmware_without_the_new_keys(controller):
     state = ControllerState.from_dict(controller.snapshot()["state"])
 
     assert state.readings.primary_eev is None
+    assert state.readings.aux_eev is None
     assert state.readings.ac_voltage is None
     assert state.readings.ac_current is None
     assert state.readings.dc_voltage is None
@@ -155,24 +156,27 @@ def test_readings_accept_explicit_nulls(controller):
     """The controller sends null when a register has not been read."""
     data = controller.snapshot()["state"]
     data["readings"].update(
-        primary_eev=None, ac_voltage=None, ac_current=None, dc_voltage=None
+        primary_eev=None, aux_eev=None, ac_voltage=None, ac_current=None,
+        dc_voltage=None,
     )
 
     state = ControllerState.from_dict(data)
 
     assert state.readings.primary_eev is None
+    assert state.readings.aux_eev is None
     assert state.readings.dc_voltage is None
 
 
 def test_readings_parse_the_new_keys(controller):
     data = controller.snapshot()["state"]
     data["readings"].update(
-        primary_eev=350, ac_voltage=236, ac_current=5, dc_voltage=380.0
+        primary_eev=18, aux_eev=12, ac_voltage=236, ac_current=5, dc_voltage=380.0
     )
 
     state = ControllerState.from_dict(data)
 
-    assert state.readings.primary_eev == 350
+    assert state.readings.primary_eev == 18
+    assert state.readings.aux_eev == 12
     assert state.readings.ac_voltage == 236
     assert state.readings.ac_current == 5
     assert state.readings.dc_voltage == 380.0
