@@ -353,9 +353,11 @@ class ReadingState:
     # real and alarming state. Callers must pass None straight through so it
     # surfaces as unavailable/unknown instead of a fabricated zero.
     #
-    # primary_eev is raw steps. The mainboard publishes no full-scale step
-    # count, so it cannot be converted to a percentage.
+    # primary_eev (OEM A5) and aux_eev (OEM o6, the EVI/economizer valve) are
+    # raw steps. The mainboard publishes no full-scale step count, so they
+    # cannot be converted to a percentage.
     primary_eev: float | None = None
+    aux_eev: float | None = None
     ac_voltage: float | None = None
     ac_current: float | None = None
     dc_voltage: float | None = None
@@ -584,6 +586,9 @@ class ControllerState:
                 # with rollback, so tolerating the older shape is permanent.
                 primary_eev=_optional_number(
                     readings.get("primary_eev"), "state.readings.primary_eev"
+                ),
+                aux_eev=_optional_number(
+                    readings.get("aux_eev"), "state.readings.aux_eev"
                 ),
                 ac_voltage=_optional_number(
                     readings.get("ac_voltage"), "state.readings.ac_voltage"
