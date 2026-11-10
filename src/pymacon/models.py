@@ -368,6 +368,12 @@ class ReadingState:
     flow_lpm: float | None = None
     perf_source: str | None = None
     perf_fallback: bool | None = None
+    # Loop water temperatures from the same source as COP (perf_source).
+    # supply_c/return_c are published whenever a reading exists, including
+    # while idle; delta_t (supply - return) is None unless the pump runs.
+    supply_c: float | None = None
+    return_c: float | None = None
+    delta_t: float | None = None
 
 
 TREND_VALUES = ("rising", "falling", "steady")
@@ -604,6 +610,15 @@ class ControllerState:
                 ),
                 perf_source=_clean_string(readings.get("perf_source")),
                 perf_fallback=_opt_bool(readings.get("perf_fallback")),
+                supply_c=_optional_number(
+                    readings.get("supply_c"), "state.readings.supply_c"
+                ),
+                return_c=_optional_number(
+                    readings.get("return_c"), "state.readings.return_c"
+                ),
+                delta_t=_optional_number(
+                    readings.get("delta_t"), "state.readings.delta_t"
+                ),
             ),
             trends=TrendState.from_value(data.get("trends")),
             energy=EnergyTotals.from_value(data.get("energy")),
