@@ -221,6 +221,25 @@ def test_performance_inputs_and_trends_parse(controller):
     assert state.trends.inlet is None  # "unknown" means no direction yet
 
 
+def test_loop_temperatures_absent_on_older_firmware(controller):
+    state = ControllerState.from_dict(controller.snapshot()["state"])
+
+    assert state.readings.supply_c is None
+    assert state.readings.return_c is None
+    assert state.readings.delta_t is None
+
+
+def test_loop_temperatures_parse_and_idle_delta_is_null(controller):
+    data = controller.snapshot()["state"]
+    data["readings"].update(supply_c=24.5, return_c=20.1, delta_t=4.4)
+    state = ControllerState.from_dict(data)
+    assert (state.readings.supply_c, state.readings.return_c) == (24.5, 20.1)
+    assert state.readings.delta_t == 4.4
+
+    data["readings"]["delta_t"] = None
+    assert ControllerState.from_dict(data).readings.delta_t is None
+
+
 def test_malformed_trends_never_break_the_snapshot(controller):
     data = controller.snapshot()["state"]
     data["trends"] = {"tank": 5, "outlet": "sideways"}
